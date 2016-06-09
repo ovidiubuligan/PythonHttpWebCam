@@ -6,6 +6,7 @@
 import cv2
 import ConfigParser
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
+from SocketServer import ThreadingMixIn
 import time
 
 capture = None
@@ -20,10 +21,10 @@ def init_config(config):
 	config['ImageRefreshInterval'] = config_parser.getfloat('Root', 'ImageRefreshInterval')
 	config['IdleCameraStop'] = config_parser.getint('Root', 'IdleCameraStop')
 	config['Port'] = config_parser.getint('Root', 'Port')
+	config['CameraSource'] = config_parser.getint('Root', 'CameraSource')
 
 
 class CamHandler(BaseHTTPRequestHandler):
-
 	def do_GET(self):
 		print self.path
 		if self.path.endswith('.mjpg'):
@@ -34,7 +35,7 @@ class CamHandler(BaseHTTPRequestHandler):
 				try:
 					rc, img = capture.read()
 					if not rc:
-						continue
+					zz	continue
 					imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 					r, buf = cv2.imencode(".jpg", imgRGB)
 					self.wfile.write("--jpgboundary\r\n")
@@ -43,7 +44,7 @@ class CamHandler(BaseHTTPRequestHandler):
 					self.end_headers()
 					self.wfile.write(bytearray(buf))
 					self.wfile.write('\r\n')
-					time.sleep(self.config['ImageRefreshInterval'])
+					time.sleep(config['ImageRefreshInterval'])
 				except KeyboardInterrupt:
 					break
 			return
@@ -57,21 +58,29 @@ class CamHandler(BaseHTTPRequestHandler):
 			return
 
 
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+	"""Handle requests in a separate thread."""
+
+
 def main():
 	global capture
 	init_config(config)
 
-	#capture = cv2.VideoCapture(0)
-	capture = cv2.VideoCapture('hst_1.mpg'); #CAP_FFMPEG
+	# capture = cv2.VideoCapture(config['CameraSource'])
+	capture = cv2.VideoCapture('hst_1.mpg');  # CAP_FFMPEG
 	capture.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, config['CaptureWidth'])
 	capture.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, config['CaptureHeight'])
 	try:
-		server = HTTPServer(('', config['Port']), CamHandler)
+		server = ThreadedHTTPServer(('', config['Port']), CamHandler)
+		# Prevent issues with socket reuse
+		server.allow_reuse_address = True
 		print "server started"
 		server.serve_forever()
 	except KeyboardInterrupt:
 		capture.release()
 		server.socket.close()
 	capture.release()
+
+
 if __name__ == '__main__':
 	main()
