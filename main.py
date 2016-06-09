@@ -7,10 +7,13 @@ import cv2
 import ConfigParser
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 from SocketServer import ThreadingMixIn
+from threading import Thread
+import threading
 import time
 
-capture = None
 config = {}
+
+captureThread = None
 
 def init_config(config):
 	config_parser = ConfigParser.ConfigParser()
@@ -33,16 +36,15 @@ class CamHandler(BaseHTTPRequestHandler):
 			self.end_headers()
 			while True:
 				try:
-					rc, img = capture.read()
-					if not rc:
-					zz	continue
-					imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-					r, buf = cv2.imencode(".jpg", imgRGB)
+					global captureThread
+					imgBuffer = captureThread.ReadBuffer()
+					if imgBuffer is None:
+						continue
 					self.wfile.write("--jpgboundary\r\n")
 					self.send_header('Content-type', 'image/jpeg')
-					self.send_header('Content-length', str(len(buf)))
+					self.send_header('Content-length', str(len(imgBuffer)))
 					self.end_headers()
-					self.wfile.write(bytearray(buf))
+					self.wfile.write(bytearray(imgBuffer))
 					self.wfile.write('\r\n')
 					time.sleep(config['ImageRefreshInterval'])
 				except KeyboardInterrupt:
@@ -62,14 +64,66 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 	"""Handle requests in a separate thread."""
 
 
+class CaptureThread(Thread):
+	def __init__(self):
+		Thread.__init__(self)
+		self.stopped = False
+		self.paused = False
+		self.ImageBuff = None
+		self.LastAcessed = time.time()
+		self.IdleCameraStop = config['IdleCameraStop']
+		self.RefreshInterval = config['ImageRefreshInterval']
+		self.capture = None
+
+		self.ImageBuffLock = threading.Lock()
+		self.InitCaputure()
+
+	def run(self):
+		while not self.stopped:
+			if self.capture and self.capture.isOpened():
+				self.WriteBuffer()
+			if((time.time() - self.LastAcessed)> self.IdleCameraStop):
+				self.ReleaseCapture()
+			time.sleep(self.RefreshInterval)
+		# call a function
+
+	def InitCaputure(self):
+		print "initializing capture device"
+		self.capture = cv2.VideoCapture(config['CameraSource'])
+		#self.capture = cv2.VideoCapture('hst_1.mpg');  # CAP_FFMPEG
+		self.capture.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, config['CaptureWidth'])
+		self.capture.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, config['CaptureHeight'])
+
+	def ReleaseCapture(self):
+		if self.capture and self.capture.isOpened():
+			self.capture.release()
+			print "capture device released"
+
+	def WriteBuffer(self):
+		rc, img = self.capture.read()
+		if not rc:
+			return
+		imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+		with self.ImageBuffLock:
+			r, self.ImageBuff= cv2.imencode(".jpg", imgRGB)
+
+	def ReadBuffer(self):
+		if self.capture and not self.capture.isOpened():
+			self.InitCaputure()
+			self.WriteBuffer()
+
+		self.LastAcessed = time.time()
+		return self.ImageBuff
+
 def main():
 	global capture
 	init_config(config)
 
-	# capture = cv2.VideoCapture(config['CameraSource'])
-	capture = cv2.VideoCapture('hst_1.mpg');  # CAP_FFMPEG
-	capture.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, config['CaptureWidth'])
-	capture.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, config['CaptureHeight'])
+	global captureThread
+	captureThread = CaptureThread()
+	captureThread.start();
+
+
 	try:
 		server = ThreadedHTTPServer(('', config['Port']), CamHandler)
 		# Prevent issues with socket reuse
@@ -77,7 +131,7 @@ def main():
 		print "server started"
 		server.serve_forever()
 	except KeyboardInterrupt:
-		capture.release()
+		captureThread.stopped = True
 		server.socket.close()
 	capture.release()
 
