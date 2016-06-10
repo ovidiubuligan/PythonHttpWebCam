@@ -89,8 +89,8 @@ class CaptureThread(Thread):
 
 	def InitCaputure(self):
 		print "initializing capture device"
-		self.capture = cv2.VideoCapture(config['CameraSource'])
-		#self.capture = cv2.VideoCapture('hst_1.mpg');  # CAP_FFMPEG
+		#self.capture = cv2.VideoCapture(config['CameraSource'])
+		self.capture = cv2.VideoCapture('hst_1.mpg')  # CAP_FFMPEG
 		self.capture.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, config['CaptureWidth'])
 		self.capture.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, config['CaptureHeight'])
 
